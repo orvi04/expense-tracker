@@ -42,7 +42,6 @@ class ExpenseTrackerCLI(cmd.Cmd):
             if args['recur_interval']:
                 confirmation += f" (recurring {args['recur_interval']})"
             print(confirmation)
-            print(transactions)
         except ValueError as e:
             print(f"Invalid input: {e}")
         except Exception as e:
@@ -54,7 +53,6 @@ class ExpenseTrackerCLI(cmd.Cmd):
         try:
             args = self._parse_date_args(arg)
             target_date = args['date']
-            print(target_date)
             balance = calc_proj_bal(target_date)
 
             # Improved output formatting
