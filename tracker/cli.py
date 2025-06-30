@@ -1,6 +1,7 @@
 import cmd
 from datetime import date
 from typing import Optional
+from dateutil.relativedelta import relativedelta
 from tracker.logic import (
     add_budget_category,
     delete_budget_category,
@@ -12,7 +13,7 @@ from tracker.logic import (
     delete_transactions_by_criteria
 )
 from tracker.storage import save_data, load_data, list_save_files
-from tracker.models import budget_categories, transactions, balance_history
+from tracker.models import budget_categories, transactions, balance_history, Transaction
 
 
 class ExpenseTrackerCLI(cmd.Cmd):
@@ -24,7 +25,7 @@ class ExpenseTrackerCLI(cmd.Cmd):
 
     # ===== CORE COMMANDS =====
     def do_add(self, arg):
-        """Add a transaction: add <amount> <income|expense> [category] [date=YYYY-MM-DD] [--recurring] [--desc]"""
+        """Add a transaction: add <amount> <income|expense> [category] [date=YYYY-MM-DD] [--recur <daily|weekly|monthly|yearly>] [--desc "description"]"""
         try:
             args = self._parse_add_args(arg)
             add_transaction(
@@ -32,34 +33,83 @@ class ExpenseTrackerCLI(cmd.Cmd):
                 t_type=args['type'],
                 t_date=args['date'],
                 category_name=args['category'],
-                is_rec=args['recurring'],
+                is_rec=bool(args['recur_interval']),  # True if interval specified
+                rec_interval=args['recur_interval'],
                 desc=args['desc']
             )
-            print(f"✓ Added {args['type']} of ${args['amount']:.2f}")
+            # Print confirmation with recurrence info if applicable
+            confirmation = f"✓ Added {args['type']} of ${args['amount']:.2f}"
+            if args['recur_interval']:
+                confirmation += f" (recurring {args['recur_interval']})"
+            print(confirmation)
+            print(transactions)
+        except ValueError as e:
+            print(f"Invalid input: {e}")
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error adding transaction: {e}")
 
     def do_balance(self, arg):
-        """View current balance and spending summary"""
+        """Calculate projected balance up to specified date"""
+        """balance [YYYY-MM-DD]"""
         try:
-            # Current balance
-            balance = calc_proj_bal(date.today())
-            print(f"\nCurrent Balance: ${balance:.2f}")
+            args = self._parse_date_args(arg)
+            target_date = args['date']
+            print(target_date)
+            balance = calc_proj_bal(target_date)
 
-            # Monthly summary
-            monthly = check_spending(month=date.today().month, year=date.today().year)
-            print(f"\nMonthly Summary ({monthly['target_date'][:7]}):")
-            print(f"  Income: ${monthly['totals']['income']:.2f}")
-            print(f"  Expenses: ${monthly['totals']['expense']:.2f}")
-            print(f"  Net: ${monthly['totals']['net']:.2f}")
+            # Improved output formatting
+            print(f"\nProjected Balance on {target_date}:")
+            print(f"  ${balance:,.2f}")
 
-            # Category breakdown
-            if monthly['categories']:
-                print("\nCategories:")
-                for cat, data in monthly['categories'].items():
-                    print(f"  {cat}: ${data['net']:.2f} (I: ${data['income']:.2f}, E: ${data['expense']:.2f})")
+            if target_date < date.today():
+                print("\nNote: Historical balance (includes all past transactions)")
+            elif target_date == date.today():
+                print("\nNote: Current balance")
+            else:
+                print("\nNote: Future projection (includes confirmed recurring transactions)")
+
         except Exception as e:
-            print(f"Error: {e}")
+            print(f"Error calculating balance: {e}")
+
+    def do_report(self, arg):
+        """
+        Generate spending report:
+        report [timeframe] [date=YYYY-MM-DD|year=YYYY|month=MM] [--categories]
+
+        Timeframes:
+            --day       Daily report
+            --week      Weekly report
+            --month     Monthly report
+            --year      Annual report
+
+        Examples:
+            report --day 2023-08-15 --categories
+            report --month 8          # Current August
+            report --year 2023        # Full year
+        """
+        try:
+            args = self._parse_report_args(arg)
+            result = check_spending(**args)
+
+            # Print report header
+            timeframe = args.get('timeframe', 'day')
+            print(f"\n{' ' + timeframe.capitalize() + ' Report ':-^50}")
+            print(f"Period: {result['target_date']}")
+
+            # Print totals
+            print(f"\nTotals:")
+            print(f"  Income:   ${result['totals']['income']:.2f}")
+            print(f"  Expenses: ${result['totals']['expense']:.2f}")
+            print(f"  Net:      ${result['totals']['net']:.2f}")
+
+            # Print category breakdown if requested
+            if args.get('show_categories'):
+                print("\nBy Category:")
+                for cat, data in result['categories'].items():
+                    print(f"  {cat}: ${data['net']:.2f} (Income: ${data['income']:.2f}, Expense: ${data['expense']:.2f})")
+
+        except Exception as e:
+            print(f"Error generating report: {e}")
 
     def do_delete(self, arg):
         """Delete transactions: delete <ID> OR delete --filter <criteria>"""
@@ -184,29 +234,100 @@ class ExpenseTrackerCLI(cmd.Cmd):
 
     # ===== HELPERS =====
     def _parse_add_args(self, arg):
+        """Parse add command arguments with proper date handling"""
         args = arg.split()
         if len(args) < 2:
-            raise ValueError("Missing required arguments")
+            raise ValueError("Missing required arguments (amount and type)")
 
         result = {
             'amount': float(args[0]),
             'type': args[1].lower(),
-            'category': args[2] if len(args) > 2 else None,
-            'date': date.today(),
-            'recurring': False,
+            'category': None,
+            'date': date.today(),  # Default to today
+            'recur_interval': None,
             'desc': ""
         }
 
-        # Parse optional flags
-        i = 3
+        # Validate transaction type
+        if result['type'] not in ('income', 'expense'):
+            raise ValueError("Type must be 'income' or 'expense'")
+
+        i = 2
         while i < len(args):
-            if args[i] == "--recurring":
-                result['recurring'] = True
-            elif args[i] == "--desc":
-                result['desc'] = " ".join(args[i + 1:]) if i + 1 < len(args) else ""
+            if args[i] == '--recur':
+                if i+1 >= len(args):
+                    raise ValueError("Missing recurrence interval after --recur")
+                if args[i+1] not in ('daily', 'weekly', 'monthly', 'yearly'):
+                    raise ValueError("Invalid interval, use: daily/weekly/monthly/yearly")
+                result['recur_interval'] = args[i+1]
+                i += 2
+            elif args[i] == '--desc':
+                result['desc'] = ' '.join(args[i+1:]) if i+1 < len(args) else ""
                 break
-            elif "-" not in args[i]:  # Assume date
-                result['date'] = date.fromisoformat(args[i])
+            elif args[i].startswith('--'):
+                raise ValueError(f"Unknown flag: {args[i]}")
+            else:
+                # Try to parse as date first (YYYY-MM-DD)
+                try:
+                    result['date'] = date.fromisoformat(args[i])
+                    i += 1
+                    continue
+                except ValueError:
+                    pass
+
+                # If not a date, treat as category (only if category not already set)
+                if result['category'] is None:
+                    result['category'] = args[i]
+                    i += 1
+                else:
+                    raise ValueError(f"Unexpected argument: {args[i]}")
+
+        return result
+
+    @staticmethod
+    def _parse_date_args(arg):
+        """Parse date arguments for balance projection"""
+        args = arg.split()
+        result = {'date': date.today()}
+
+        if args:
+            try:
+                result['date'] = date.fromisoformat(args[0])
+            except ValueError:
+                raise ValueError("Date must be in YYYY-MM-DD format")
+
+        return result
+
+    @staticmethod
+    def _parse_report_args(arg):
+        """Parse arguments for spending reports"""
+        args = arg.split()
+        result = {
+            'day': None,
+            'month': None,
+            'year': None,
+            'show_categories': False
+        }
+
+        i = 0
+        while i < len(args):
+            if args[i] == '--day':
+                result['timeframe'] = 'day'
+                if i+1 < len(args) and not args[i+1].startswith('-'):
+                    result['day'] = int(args[i+1])
+                    i += 1
+            elif args[i] == '--month':
+                result['timeframe'] = 'month'
+                if i+1 < len(args) and not args[i+1].startswith('-'):
+                    result['month'] = int(args[i+1])
+                    i += 1
+            elif args[i] == '--year':
+                result['timeframe'] = 'year'
+                if i+1 < len(args) and not args[i+1].startswith('-'):
+                    result['year'] = int(args[i+1])
+                    i += 1
+            elif args[i] == '--categories':
+                result['show_categories'] = True
             i += 1
 
         return result

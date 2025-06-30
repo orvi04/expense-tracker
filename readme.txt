@@ -27,7 +27,7 @@ pip install -r requirements.txt
 ### 💸 Transaction Commands
 | Command | Example | Description |
 |---------|---------|-------------|
-| **Add Transaction**<br>`add <amount> <type> [category] [--date YYYY-MM-DD] [--recurring TYPE] [--desc "notes"]` | `add 25.50 expense Coffee`<br>`add 2000 income Salary --recurring monthly`<br>`add 15.99 expense Movies --desc "Date night" --date 2023-08-20` | Record new transaction<br>Add recurring income<br>Add dated expense with notes |
+| **Add Transaction**<br>`add <amount> <type> [category] [--date YYYY-MM-DD] [--recur <daily|weekly|monthly|yearly>] [--desc "notes"]` | `add 25.50 expense Coffee`<br>`add 2000 income Salary --recurring monthly`<br>`add 15.99 expense Movies --desc "Date night" --date 2023-08-20` | Record new transaction<br>Add recurring income<br>Add dated expense with notes |
 | **Delete Transaction**<br>`delete <ID>`<br>`delete --filter [--type TYPE] [--category NAME] [--amount X] [--from DATE] [--to DATE]` | `delete 7`<br>`delete --filter --category Dining`<br>`delete --filter --from 2023-01-01 --to 2023-12-31 --amount 50` | Delete by transaction ID<br>Delete all dining expenses<br>Delete all $50 transactions in 2023 |
 
 ### 🗂 Category Commands
@@ -40,8 +40,8 @@ pip install -r requirements.txt
 ### 📊 Reporting Commands
 | Command | Example | Description |
 |---------|---------|-------------|
-| **View Balance**<br>`balance [--day] [--month M] [--year Y]` | `balance`<br>`balance --month 7`<br>`balance --year 2022` | Current balance<br>July summary<br>Full 2022 report |
-| **Category Breakdown**<br>`balance --category NAME` | `balance --category Food` | Spending for specific category |
+| **View Balance**<br>`balance [YYYY-MM-DD]` | `balance`<br>`balance 2025-07-01`<br>`balance` |
+| **Spending Breakdown**<br>`report [timeframe] [date=YYYY-MM-DD|year=YYYY|month=MM] [--categories]` |
 
 ### 💾 Data Commands
 | Command | Example | Description |
