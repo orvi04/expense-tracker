@@ -4,7 +4,6 @@ import os
 from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
-#from tracker import *
 from tracker.models import (
     TransactionType, Transaction, BudgetCategory,
     BalanceCheckpoint, budget_categories, transactions, balance_history
@@ -19,7 +18,6 @@ from tracker.logic import (
 from tracker.storage import (
     save_data, load_data, list_save_files, SAVES_DIR
 )
-
 
 
 class TestBudgetTracker(unittest.TestCase):
@@ -363,6 +361,7 @@ class TestBudgetTracker(unittest.TestCase):
         """Clean up any test files"""
         for f in SAVES_DIR.glob("test_*.json"):
             f.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -68,6 +68,42 @@ def add_transaction(
         category.transactions.append(transaction)
 
 
+def delete_transaction(transaction_id: int) -> bool:
+    global transactions
+
+    for i, t in enumerate(transactions):
+        if t.id == transaction_id:
+            if t.category:
+                t.category.transactions = [tr for tr in t.category.transactions if tr.id != transaction_id]
+            transactions.pop(i)
+            return True
+    return False
+
+
+def delete_transactions_by_criteria(
+        amount: Optional[float] = None,
+        t_type: Optional[TransactionType] = None,
+        date_range: Optional[tuple[date, date]] = None,
+        category_name: Optional[str] = None
+) -> int:
+    global transactions
+
+    to_delete = []
+    for t in transactions:
+        if ((amount is None or t.amount == amount) and
+                (t_type is None or t.t_type == t_type) and
+                (date_range is None or (date_range[0] <= t.t_date <= date_range[1])) and
+                (category_name is None or (t.category and t.category.name == category_name))):
+            to_delete.append(t.id)
+    initial_count = len(transactions)
+    transactions = [t for t in transactions if t.id not in to_delete]
+
+    for cat in budget_categories:
+        cat.transactions = [t for t in cat.transactions if t.id not in to_delete]
+
+    return initial_count - len(transactions)
+
+
 def set_timeframe(
         year: Optional[int] = None,
         month: Optional[int] = None,
@@ -92,7 +128,6 @@ def set_timeframe(
 
 
 def check_spending(day: Optional[int] = None, month: Optional[int] = None, year: Optional[int] = None):
-
     timeframe, target_date = set_timeframe(year, month, day)
 
     total = {

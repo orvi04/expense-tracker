@@ -28,79 +28,114 @@ def save_data(save_name="default"):
     data = {
         "metadata": {
             "version": "1.0",
-            "created": date.today().isoformat()
+            "created": date.today().isoformat(),
+            "transaction_counter": len(transactions)
         },
         "categories": [
             {
                 "name": cat.name,
                 "monthly_limit": cat.monthly_limit,
+                "transaction_ids": [t.id for t in cat.transactions]
             } for cat in budget_categories
         ],
         "transactions": [
             {
-                **t.__dict__,
+                "id": t.id,
+                "amount": t.amount,
+                "t_type": t.t_type,
+                "t_date": t.t_date.isoformat(),
+                "is_rec": t.is_rec,
+                "rec_interval": t.rec_interval,
+                "desc": t.desc,
                 "category": t.category.name if t.category else None
             } for t in transactions
         ],
-        "checkpoints": [c.__dict__ for c in balance_history]
+        "checkpoints": [
+            {
+                "date": cp.date.isoformat(),
+                "amount": cp.amount
+            } for cp in balance_history
+        ]
     }
-    json_str = json.dumps(
-        data,
-        cls=EnhancedJSONEncoder,
-        indent=2
-    )
-    (SAVES_DIR / f"{save_name}.json").write_text(json_str)
+
+    try:
+        json_str = json.dumps(data, cls=EnhancedJSONEncoder, indent=2)
+        save_path = SAVES_DIR / f"{save_name}.json"
+        save_path.write_text(json_str)
+        print(f"✓ Saved {len(transactions)} transactions to '{save_name}'")
+        return True
+    except Exception as e:
+        print(f"Error saving data: {e}")
+        return False
 
 
 def load_data(save_name="default"):
     global transactions, balance_history, budget_categories
     try:
         filepath = SAVES_DIR / f"{save_name}.json"
+        if not filepath.exists():
+            print(f"Save file '{save_name}' not found")
+            return False
+
         data = json.loads(filepath.read_text())
 
-        # Clear existing data
         transactions.clear()
         balance_history.clear()
         budget_categories.clear()
 
-        # Rebuild categories
+        category_map = {}
         for cat_data in data.get("categories", []):
-            budget_categories.append(
-                BudgetCategory(
-                    name=cat_data["name"],
-                    monthly_limit=cat_data.get("monthly_limit")
+            new_cat = BudgetCategory(
+                name=cat_data["name"],
+                monthly_limit=cat_data.get("monthly_limit")
+            )
+            budget_categories.append(new_cat)
+            category_map[new_cat.name] = new_cat
+
+        id_to_transaction = {}
+        for t_data in data.get("transactions", []):
+            try:
+                transaction = Transaction(
+                    id=t_data["id"],
+                    amount=t_data["amount"],
+                    t_type=t_data["t_type"],
+                    t_date=date.fromisoformat(t_data["t_date"]),
+                    is_rec=t_data["is_rec"],
+                    rec_interval=t_data["rec_interval"],
+                    desc=t_data["desc"],
+                    category=category_map.get(t_data["category"]) if t_data.get("category") else None
                 )
-            )
+                transactions.append(transaction)
+                id_to_transaction[transaction.id] = transaction
+            except Exception as e:
+                print(f"Warning: Skipping invalid transaction {t_data.get('id')}: {e}")
 
-        # Helper: map category name to BudgetCategory object for quick lookup
-        category_map = {cat.name: cat for cat in budget_categories}
+        # 3. Rebuild category transaction lists
+        for cat_data in data.get("categories", []):
+            if cat_data["name"] in category_map:
+                category_map[cat_data["name"]].transactions = [
+                    id_to_transaction[t_id]
+                    for t_id in cat_data.get("transaction_ids", [])
+                    if t_id in id_to_transaction
+                ]
 
-        # Rebuild transactions and link category objects
-        for t in data["transactions"]:
-            category_obj = category_map.get(t["category"])
-            transaction = Transaction(
-                amount=t['amount'],
-                t_type=t['t_type'],
-                t_date=date.fromisoformat(t['t_date']),
-                is_rec=t['is_rec'],
-                rec_interval=t['rec_interval'],
-                desc=t['desc'],
-                category=category_obj
-            )
-            transactions.append(transaction)
+        # 4. Restore balance checkpoints
+        for cp_data in data.get("checkpoints", []):
+            try:
+                balance_history.append(BalanceCheckpoint(
+                    date=date.fromisoformat(cp_data["date"]),
+                    amount=cp_data["amount"]
+                ))
+            except Exception as e:
+                print(f"Warning: Skipping invalid checkpoint: {e}")
 
-            # Also update category.transactions lists
-            if category_obj is not None:
-                category_obj.transactions.append(transaction)
+        print(f"✓ Loaded {len(transactions)} transactions, {len(budget_categories)} categories")
+        return True
 
-        # Rebuild balance checkpoints
-        balance_history.extend(
-            BalanceCheckpoint(
-                date=date.fromisoformat(c['date']),
-                amount=c['amount']
-            ) for c in data.get("checkpoints", [])
-        )
-
-        print(f"Loaded save '{save_name}' with {len(transactions)} transactions and {len(budget_categories)} categories")
-    except FileNotFoundError:
-        print(f"Save file '{save_name}' not found. Starting fresh.")
+    except Exception as e:
+        print(f"Error loading data: {e}")
+        # Clear partial load on failure
+        transactions.clear()
+        balance_history.clear()
+        budget_categories.clear()
+        return False

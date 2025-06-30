@@ -23,6 +23,7 @@ class Transaction:
     rec_interval: str | None = None
     desc: str = ""
     category: Optional[BudgetCategory] = None
+    id: int = field(default_factory=lambda: len(transactions) + 1)
 
 
 @dataclass
